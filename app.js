@@ -36,3 +36,37 @@ $('notes').innerHTML=[...D.notes,'Perfiles de cobertura: '+D.coverageRoles.join(
 ['from','to','store','role'].forEach(id=>$(id).addEventListener('change',render));$('state').addEventListener('change',()=>{stores();render()});$('reset').onclick=reset;
 $('export').onclick=()=>{const rows=[['Fecha','Tienda','Perfil','Codigo','Cantidad'],...view.flatMap(r=>Object.entries(r.codes).map(([c,n])=>[r.date,r.store,r.role,c,n]))];const csv='\ufeff'+rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='falabella-asistencias.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 reset();
+
+function coverageMetrics(stores,staff){
+ const operating=stores.filter(s=>s.status==='OPERANDO');
+ const m={operating:operating.length,required:0,active:0,covered:0,vacancies:0,excess:0,pending:0,evaluated:0,profiles:[]};
+ for(const [key,role,label] of [['promoters','PROMOTOR DE CREDITO','Promotores'],['subleaders','SUBLIDER','Sublíderes']]){
+  const p={label,required:0,active:0,pending:0};
+  for(const s of operating){
+   const req=Number(s[key])||0;p.required+=req;m.required+=req;
+   if(!s.hasAttendance){p.pending+=req;m.pending+=req;continue}
+   const active=staff.filter(r=>r.store===s.id&&r.role===role&&r.status==='ACTIVO').reduce((n,r)=>n+r.count,0);
+   p.active+=active;m.active+=active;m.covered+=Math.min(req,active);m.vacancies+=Math.max(0,req-active);m.excess+=Math.max(0,active-req);m.evaluated+=req;
+  }
+  m.profiles.push(p);
+ }
+ return m;
+}
+function covStores(){
+ const previous=$('covStore').value;$('covStore').innerHTML='<option value="">Todas las tiendas</option>';
+ D.stores.filter(s=>!$('covRegion').value||(s.region||'Sin región')===$('covRegion').value).forEach(s=>option($('covStore'),s.id,s.id+' · '+s.name));
+ if([...$('covStore').options].some(o=>o.value===previous))$('covStore').value=previous;
+}
+function coverage(){
+ const selected=D.stores.filter(s=>(!$('covRegion').value||(s.region||'Sin región')===$('covRegion').value)&&(!$('covStore').value||s.id===$('covStore').value));
+ const m=coverageMetrics(selected,D.staff),partial=m.pending>0;
+ $('covScope').textContent=`${selected.length} tiendas en la selección · ${m.operating} operando. KPI y gráficas calculados con estos filtros. Región corresponde a ZONA en la base.`;
+ $('covKpis').innerHTML=[['Tiendas operando',m.operating,'Tiendas operando en la selección'],['Plantilla requerida',m.required,'Promotores y sublíderes requeridos'],['Personal activo',m.evaluated?m.active:'—',partial?'Personal confirmado · información parcial':'Personal elegible de las tiendas operando'],['Vacantes',m.evaluated?m.vacancies:'—',partial?'Confirmadas en tiendas con datos · '+m.pending+' plazas por evaluar':'Faltantes por tienda y perfil; sin compensar excedentes']].map(([label,value,note])=>`<div class="kpi"><p>${label}</p><strong>${value}</strong><small>${note}</small></div>`).join('');
+ const rate=m.evaluated?100*m.covered/m.evaluated:0;
+ $('covGeneral').innerHTML=`<div class="donut-layout"><div class="donut" style="--pct:${rate}%" role="img" aria-label="${esc(pct(m.covered,m.evaluated))} de cobertura en plazas evaluadas"><div><strong>${pct(m.covered,m.evaluated)}</strong><span>${partial?'COBERTURA PARCIAL':'COBERTURA'}</span></div></div><dl class="covstats"><div><dt>Plazas cubiertas</dt><dd>${m.covered}</dd></div><div><dt>Vacantes confirmadas</dt><dd>${m.vacancies}</dd></div><div><dt>Excedentes por tienda y perfil</dt><dd>${m.excess}</dd></div><div><dt>Plazas sin datos de asistencia</dt><dd>${m.pending}</dd></div></dl></div><p class="covnote">${m.evaluated} de ${m.required} plazas evaluadas.${partial?' El porcentaje excluye las plazas sin datos.':''}</p>`;
+ $('covProfiles').innerHTML=m.profiles.map(p=>{const max=Math.max(1,p.required,p.active);return `<div class="profile"><h3>${p.label}</h3><div class="profilebar"><span>Requeridos</span><div><i style="width:${100*p.required/max}%"></i></div><b>${p.required}</b></div><div class="profilebar actual"><span>Activos</span><div><i style="width:${100*p.active/max}%"></i></div><b>${m.evaluated?p.active:'—'}</b></div>${p.pending?`<small>${p.pending} plazas requeridas sin datos de asistencia.</small>`:''}</div>`}).join('');
+}
+[...new Set(D.stores.map(s=>s.region||'Sin región'))].sort().forEach(r=>option($('covRegion'),r,r));
+$('covRegion').onchange=()=>{covStores();coverage()};$('covStore').onchange=coverage;
+$('covReset').onclick=()=>{$('covRegion').value='';$('covStore').value='';covStores();coverage()};
+covStores();coverage();
