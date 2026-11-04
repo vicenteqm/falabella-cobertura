@@ -10,7 +10,14 @@ function option(el,value,label){const o=document.createElement('option');o.value
 [...new Set(D.stores.map(s=>s.state))].sort().forEach(v=>option($('state'),v,v));
 [...new Set(D.daily.map(r=>r.role))].sort().forEach(v=>option($('role'),v,v));
 function stores(){const old=$('store').value;$('store').innerHTML='<option value="">Todas las tiendas</option>';D.stores.filter(s=>!$('state').value||s.state===$('state').value).forEach(s=>option($('store'),s.id,s.id+' · '+s.name));if([...$('store').options].some(o=>o.value===old))$('store').value=old}
-function reset(){$('from').value=D.period+'-01';$('to').value=D.period+'-'+new Date(+D.period.slice(0,4),+D.period.slice(5),0).getDate();$('state').value='';$('role').value='';$('store').value='';stores();render()}
+function applyMonth(period){
+ $('from').value=period+'-01';
+ const captured=D.daily.filter(row=>row.date.startsWith(period)&&Object.keys(row.codes).some(code=>code!=='SIN CAPTURA')).map(row=>row.date).sort();
+ $('to').value=captured.at(-1)||period+'-'+new Date(+period.slice(0,4),+period.slice(5),0).getDate();
+}
+D.periods.forEach(period=>option($('attendanceMonth'),period,new Intl.DateTimeFormat('es-MX',{month:'long',year:'numeric'}).format(new Date(period+'-15T12:00:00'))));
+$('attendanceMonth').onchange=()=>{applyMonth($('attendanceMonth').value);render()};
+function reset(){$('attendanceMonth').value=D.period;applyMonth(D.period);$('state').value='';$('role').value='';$('store').value='';stores();render()}
 function render(){
  const selected=D.stores.filter(s=>(!$('state').value||s.state===$('state').value)&&(!$('store').value||s.id===$('store').value));
  const ids=new Set(selected.map(s=>s.id));
