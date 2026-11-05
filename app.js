@@ -66,6 +66,7 @@ function covStores(){
 }
 function coverage(){
  const selected=D.stores.filter(s=>(!$('covRegion').value||(s.region||'Sin región')===$('covRegion').value)&&(!$('covStore').value||s.id===$('covStore').value));
+ renderSchedules(selected);
  const m=coverageMetrics(selected,D.staff),partial=m.pending>0;
  $('covScope').textContent=`${selected.length} tiendas en la selección · ${m.operating} operando. KPI y gráficas calculados con estos filtros. Región corresponde a ZONA en la base.`;
  $('covKpis').innerHTML=[['Tiendas operando',m.operating,'Tiendas operando en la selección'],['Plantilla requerida',m.required,'Promotores y sublíderes requeridos'],['Personal activo',m.evaluated?m.active:'—',partial?'Personal confirmado · información parcial':'Personal elegible de las tiendas operando'],['Vacantes',m.evaluated?m.vacancies:'—',partial?'Confirmadas en tiendas con datos · '+m.pending+' plazas por evaluar':'Faltantes por tienda y perfil; sin compensar excedentes']].map(([label,value,note])=>`<div class="kpi"><p>${label}</p><strong>${value}</strong><small>${note}</small></div>`).join('');
@@ -77,3 +78,49 @@ function coverage(){
 $('covRegion').onchange=()=>{covStores();coverage()};$('covStore').onchange=coverage;
 $('covReset').onclick=()=>{$('covRegion').value='';$('covStore').value='';covStores();coverage()};
 covStores();coverage();
+
+function scheduleForStore(store, staff) {
+    if (!store.hasAttendance) {
+        return { known: false };
+    }
+    function active(role) {
+        return staff.filter(person => person.store === store.id && person.role === role && person.status === 'ACTIVO')
+            .reduce((total, person) => total + person.count, 0);
+    }
+    const subleaders = Math.min(1, active('SUBLIDER'));
+    const promoters = Math.min(2, active('PROMOTOR DE CREDITO'));
+    const missingSubleaders = 1 - subleaders;
+    const missingPromoters = 2 - promoters;
+    let unattended = 'Con personal en ambos tramos';
+    if (subleaders + promoters === 0) {
+        unattended = '11:00–20:00';
+    } else if (subleaders === 0) {
+        unattended = '11:00–14:00';
+    }
+    return { known: true, subleaders, promoters, missingSubleaders, missingPromoters, unattended };
+}
+
+function renderSchedules(selected) {
+    const rows = selected.map(store => ({ store, schedule: scheduleForStore(store, D.staff) }));
+    const known = rows.filter(row => row.schedule.known);
+    const missingSubleaders = known.reduce((total, row) => total + row.schedule.missingSubleaders, 0);
+    const missingPromoters = known.reduce((total, row) => total + row.schedule.missingPromoters, 0);
+    const region = $('covRegion').value || 'Todas las regiones';
+    $('scheduleScope').textContent = `${region} · ${selected.length} tiendas seleccionadas · ${known.length} con datos · ${selected.length - known.length} pendientes de confirmar. Usa los filtros de Cobertura.`;
+    $('scheduleSummary').innerHTML = `
+        <div><span>Sublíderes faltantes</span><strong>${known.length ? missingSubleaders : '—'}</strong><small>11:00–20:00</small></div>
+        <div><span>Promotores faltantes</span><strong>${known.length ? missingPromoters : '—'}</strong><small>14:00–20:00</small></div>
+        <div><span>Tiendas sin confirmar</span><strong>${selected.length - known.length}</strong><small>Requieren datos de personal</small></div>`;
+    $('scheduleRows').innerHTML = rows.map(({ store, schedule }) => {
+        const title = `<td><strong>${esc(store.id + ' · ' + store.name)}</strong><small>${esc(store.city)} · ${esc(store.status)}</small></td>`;
+        if (!schedule.known) {
+            return `<tr>${title}<td colspan="5" class="schedule-unknown">Pendiente de confirmar personal · Horarios requeridos: 1 sublíder 11:00–20:00 y 2 promotores 14:00–20:00</td></tr>`;
+        }
+        return `<tr>${title}
+            <td>${schedule.subleaders}/1 cubierta<small>${schedule.missingSubleaders} faltante</small></td>
+            <td>${schedule.promoters}/2 cubiertas<small>${schedule.missingPromoters} faltantes</small></td>
+            <td class="schedule-gap">${schedule.missingSubleaders} de 1</td>
+            <td class="schedule-gap">${schedule.missingSubleaders + schedule.missingPromoters} de 3</td>
+            <td>${schedule.unattended}</td></tr>`;
+    }).join('') || '<tr><td colspan="6">Sin tiendas para estos filtros.</td></tr>';
+}
