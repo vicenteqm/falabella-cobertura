@@ -109,13 +109,51 @@ function renderSchedules(selected) {
         <div><span>Sublíderes faltantes</span><strong>${missingSubleaders}</strong><small>11:00–20:00</small></div>
         <div><span>Promotores faltantes</span><strong>${missingPromoters}</strong><small>14:00–20:00</small></div>
         <div><span>Tiendas sin asistencia</span><strong>${selected.length - known.length}</strong><small>Incluidas con 3 plazas faltantes</small></div>`;
-    $('scheduleRows').innerHTML = rows.map(({ store, schedule }) => {
-        const title = `<td><strong>${esc(store.id + ' · ' + store.name)}</strong><small>${esc(store.city)} · ${esc(store.status)}</small></td>`;
-        return `<tr>${title}
-            <td>${schedule.subleaders}/1 cubierta<small>${schedule.missingSubleaders} faltante</small></td>
-            <td>${schedule.promoters}/2 cubiertas<small>${schedule.missingPromoters} faltantes</small></td>
-            <td class="schedule-gap">${schedule.missingSubleaders} de 1</td>
-            <td class="schedule-gap">${schedule.missingSubleaders + schedule.missingPromoters} de 3</td>
-            <td>${schedule.unattended}</td></tr>`;
-    }).join('') || '<tr><td colspan="6">Sin tiendas para estos filtros.</td></tr>';
+    $('scheduleRows').innerHTML = rows.map(({ store, schedule: s }) => {
+        const missing = s.missingSubleaders + s.missingPromoters;
+        const needs = [s.missingSubleaders ? '<li><strong>1 sublíder</strong><span>11:00–20:00</span></li>' : '', s.missingPromoters ? `<li><strong>${s.missingPromoters} ${s.missingPromoters === 1 ? 'promotor' : 'promotores'}</strong><span>14:00–20:00</span></li>` : ''].join('');
+        return `<article class="schedule-card ${missing === 3 ? 'uncovered' : ''}">
+        <div class="schedule-card-head"><div><h3>${esc(store.id+' · '+store.name)}</h3><p>${esc(store.city)} · ${esc(store.status)}</p></div><span class="staff-badge">${missing ? missing+' por cubrir' : 'Plantilla completa'}</span></div>
+        <p class="staff-available">${3-missing} de 3 puestos cubiertos</p>
+        <div class="staff-meter" aria-label="${3-missing} de 3 puestos cubiertos"><span style="width:${(3-missing)/3*100}%"></span></div>
+        ${missing ? '<p class="needs-label">PERSONAL QUE FALTA</p><ul class="shift-needs">'+needs+'</ul>' : '<p class="staff-complete">Todos los puestos están cubiertos.</p>'}
+        <div class="shift-alert">${s.unattended === 'Con personal en ambos tramos' ? 'Hay personal durante todo el horario.' : '<strong>Sin personal:</strong> '+s.unattended}${missing && s.unattended === 'Con personal en ambos tramos' ? ' Faltan puestos por cubrir.' : ''}</div>
+        ${!s.known ? '<small class="no-attendance">Sin registros de asistencia: se considera la plantilla completa faltante.</small>' : ''}
+        </article>`;
+    }).join('') || '<p class="empty">Sin tiendas para estos filtros.</p>';
 }
+// Navigation keeps productivity in its own tab and preserves existing section links.
+function showDashboardTab() {
+    const commercial = location.hash === '#productividad';
+    document.querySelectorAll('main > section').forEach(section => {
+        section.hidden = commercial ? section.id !== 'productividad' : section.id === 'productividad';
+    });
+    document.querySelectorAll('nav a').forEach(a => {
+        const active = a.getAttribute('href') === (location.hash || '#cobertura');
+        if (active) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+    $('export').hidden = commercial;
+}
+function renderProductivity() {
+    const search = $('prodSearch').value.trim().toLocaleLowerCase('es');
+    const selected = D.stores.filter(s => (! $('prodRegion').value || (s.region || 'Sin región') === $('prodRegion').value)
+        && (!$('prodPartner').value || (s.partner || 'Sin socio') === $('prodPartner').value)
+        && (!search || [s.id,s.name,s.city,s.state].join(' ').toLocaleLowerCase('es').includes(search)));
+    $('prodKpis').innerHTML = [['Tiendas en selección',selected.length,'Base de tiendas'],['Activadas','—','Pendiente de datos'],['Alcance al día','—','Pendiente de datos'],['Alcance mensual','—','Pendiente de datos']].map(([label,value,note]) => `<div class="kpi"><p>${label}</p><strong>${value}</strong><small>${note}</small></div>`).join('');
+    const partners = [...new Set(selected.map(s => s.partner || 'Sin socio'))].sort();
+    $('prodPartners').innerHTML = partners.map(partner => {
+        const stores = selected.filter(s => (s.partner || 'Sin socio') === partner);
+        const metrics = coverageMetrics(stores,D.staff);
+        const hc = stores.reduce((n,s) => n+(Number(s.promoters)||0)+(Number(s.subleaders)||0),0);
+        return `<tr><td><strong>${esc(partner)}</strong></td><td>${stores.length}</td><td>${hc}</td><td>${metrics.evaluated?metrics.active:'—'}</td><td class="rate">${pct(metrics.covered,metrics.evaluated)}${metrics.pending?'<small>Información parcial</small>':''}</td>${'<td class="pending-value">—</td>'.repeat(6)}</tr>`;
+    }).join('') || '<tr><td colspan="11">Sin socios para estos filtros.</td></tr>';
+    $('prodCount').textContent = selected.length + ' tiendas';
+    $('prodRows').innerHTML = selected.map(s => `<tr><td>${esc(s.region||'Sin región')}</td><td>${esc([s.city,s.state].filter(Boolean).join(' / '))}</td><td>${esc(s.partner||'Sin socio')}</td><td>${esc(s.id)}</td><td><strong>${esc(s.name)}</strong><small>${esc(s.status)}</small></td>${'<td class="pending-value">—</td>'.repeat(12)}</tr>`).join('') || '<tr><td colspan="17">Sin tiendas para estos filtros.</td></tr>';
+}
+[...new Set(D.stores.map(s=>s.region||'Sin región'))].sort().forEach(v=>option($('prodRegion'),v,v));
+[...new Set(D.stores.map(s=>s.partner||'Sin socio'))].sort().forEach(v=>option($('prodPartner'),v,v));
+['prodRegion','prodPartner'].forEach(id => $(id).addEventListener('change',renderProductivity));
+$('prodSearch').addEventListener('input',renderProductivity);
+$('prodReset').onclick=()=>{['prodRegion','prodPartner','prodSearch'].forEach(id=>$(id).value='');renderProductivity()};
+window.addEventListener('hashchange',showDashboardTab);
+renderProductivity();showDashboardTab();
